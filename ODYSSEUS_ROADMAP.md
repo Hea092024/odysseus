@@ -28,7 +28,7 @@
 - **Fix:** Persist auth.json/sessions.json/app.db/scheduled_emails.db at 0600; create `data/` at 0700. Mirror the existing `safe_chmod(..., 0o600)` pattern from `src/secret_storage.py:44`.
 - **Effort:** Low.
 
-#### [ ] M2 — Medium — Vault endpoints reachable by the agent via `app_api`
+#### [x] M2 — Medium — Vault endpoints reachable by the agent via `app_api` — `0d5a822`
 - **Files:** `src/tool_implementations.py:2681-2687` (`_APP_API_BLOCKLIST_PREFIXES`).
 - **Fix:** Add `"/api/vault"` to the blocklist tuple.
 - **Effort:** Trivial.
@@ -241,7 +241,7 @@ Every finding above is `[x]` with a commit SHA. Recommend a final regression pas
 
 | Phase | Scope | Items | Done |
 |---|---|---|---|
-| 1 — Security | C1, C2, H1–H4, M1–M10, L1–L8 | 20 | 2 / 20 |
+| 1 — Security | C1, C2, H1–H4, M1–M10, L1–L8 | 20 | 3 / 20 |
 | 2 — Performance | P2.1–P2.7 | 7 | 0 / 7 |
 | 3 — Intelligence | P3.1–P3.7 | 7 | 0 / 7 |
 
