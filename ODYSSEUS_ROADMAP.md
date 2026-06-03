@@ -23,7 +23,7 @@
 - **Fix:** Confine `read_file`/`write_file` to a dedicated `data/agent_workspace/` instead of the whole `DATA_DIR`. If keeping `DATA_DIR` as a root, add a hard deny in `_is_sensitive_path` for any resolved path under `DATA_DIR` matching `{auth.json, sessions.json, settings.json, vault*, *.db, *.db-wal, *.db-shm, tokens*, .app_key, integrations.json}`.
 - **Effort:** Low.
 
-#### [ ] H1 — High — Secret files written world-readable (0644)
+#### [x] H1 — High — Secret files written world-readable (0644) — `266c395`
 - **Files:** `core/atomic_io.py` (`atomic_write_json` — add `mode` param, `os.chmod(tmp, mode)` before `os.replace`); `core/auth.py:160-165` (`_save` → pass `mode=0o600`); `setup.py:111-112` (chmod auth.json after write); `core/database.py:30-33` (chmod the SQLite file 0600 on create, or create `data/` as 0700 at startup).
 - **Fix:** Persist auth.json/sessions.json/app.db/scheduled_emails.db at 0600; create `data/` at 0700. Mirror the existing `safe_chmod(..., 0o600)` pattern from `src/secret_storage.py:44`.
 - **Effort:** Low.
@@ -241,7 +241,7 @@ Every finding above is `[x]` with a commit SHA. Recommend a final regression pas
 
 | Phase | Scope | Items | Done |
 |---|---|---|---|
-| 1 — Security | C1, C2, H1–H4, M1–M10, L1–L8 | 20 | 1 / 20 |
+| 1 — Security | C1, C2, H1–H4, M1–M10, L1–L8 | 20 | 2 / 20 |
 | 2 — Performance | P2.1–P2.7 | 7 | 0 / 7 |
 | 3 — Intelligence | P3.1–P3.7 | 7 | 0 / 7 |
 
