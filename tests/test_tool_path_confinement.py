@@ -196,6 +196,80 @@ def test_extra_root_still_blocks_sensitive(tmp_path):
             _resolve_tool_path("~/.ssh/authorized_keys")
 
 
+# ── C1: Odysseus state-file deny list ────────────────────────────────
+# read_file/write_file are admin-only, but the path is model-controlled, so a
+# prompt injection could otherwise read data/auth.json (live session tokens,
+# password hash, TOTP secret) and take over the account. These files live in
+# the allowlisted data dir, so the generic deny-list above does not catch them.
+
+def test_protected_state_exact_names():
+    from src.tool_execution import _is_protected_app_state
+    from src.constants import DATA_DIR
+    root = os.path.realpath(DATA_DIR)
+    for name in ("auth.json", "sessions.json", "settings.json",
+                 "integrations.json", ".app_key"):
+        assert _is_protected_app_state(os.path.join(root, name)), name
+
+
+def test_protected_state_db_and_prefixes():
+    from src.tool_execution import _is_protected_app_state
+    from src.constants import DATA_DIR
+    root = os.path.realpath(DATA_DIR)
+    for name in ("app.db", "app.db-wal", "app.db-shm",
+                 "scheduled_emails.db", "vault.json", "tokens.json"):
+        assert _is_protected_app_state(os.path.join(root, name)), name
+
+
+def test_protected_state_case_insensitive():
+    """macOS/Windows open AUTH.JSON as auth.json — the deny must casefold."""
+    from src.tool_execution import _is_protected_app_state
+    from src.constants import DATA_DIR
+    root = os.path.realpath(DATA_DIR)
+    assert _is_protected_app_state(os.path.join(root, "AUTH.JSON"))
+    assert _is_protected_app_state(os.path.join(root, "App.DB"))
+
+
+def test_protected_state_only_at_data_root():
+    """The agent's working subdirs stay usable — only the data root itself
+    is protected, so data/uploads/auth.json (a user file) is not blocked."""
+    from src.tool_execution import _is_protected_app_state
+    from src.constants import DATA_DIR
+    root = os.path.realpath(DATA_DIR)
+    assert not _is_protected_app_state(os.path.join(root, "generated_images", "x.png"))
+    assert not _is_protected_app_state(os.path.join(root, "uploads", "auth.json"))
+    assert not _is_protected_app_state("/tmp/auth.json")
+
+
+def test_resolve_blocks_auth_json():
+    from src.tool_execution import _resolve_tool_path
+    from src.constants import DATA_DIR
+    with pytest.raises(ValueError, match="application state"):
+        _resolve_tool_path(os.path.join(DATA_DIR, "auth.json"))
+
+
+def test_resolve_blocks_app_db():
+    from src.tool_execution import _resolve_tool_path
+    from src.constants import DATA_DIR
+    with pytest.raises(ValueError, match="application state"):
+        _resolve_tool_path(os.path.join(DATA_DIR, "app.db"))
+
+
+def test_resolve_blocks_auth_json_case_insensitive():
+    from src.tool_execution import _resolve_tool_path
+    from src.constants import DATA_DIR
+    with pytest.raises(ValueError, match="application state"):
+        _resolve_tool_path(os.path.join(DATA_DIR, "AUTH.JSON"))
+
+
+def test_resolve_blocks_auth_json_via_traversal():
+    """data/../data/auth.json resolves back into the data root and is blocked."""
+    from src.tool_execution import _resolve_tool_path
+    from src.constants import DATA_DIR
+    sneaky = os.path.join(DATA_DIR, "..", os.path.basename(os.path.realpath(DATA_DIR)), "auth.json")
+    with pytest.raises(ValueError, match="application state"):
+        _resolve_tool_path(sneaky)
+
+
 # ── Integration: dispatch-level tests ────────────────────────────────
 
 @pytest.mark.asyncio
@@ -279,4 +353,33 @@ async def test_write_file_dispatch_blocks_cron(monkeypatch):
         owner="admin-user",
     )
     assert "outside the allowed roots" in (result.get("error") or "")
+    assert result.get("exit_code") == 1
+
+
+@pytest.mark.asyncio
+async def test_read_file_dispatch_blocks_auth_json(monkeypatch):
+    """End-to-end (C1): an admin's read_file must not reach data/auth.json."""
+    auth_mod = sys.modules.get("core.auth")
+    if auth_mod is None:
+        import core.auth as _real_auth
+        auth_mod = _real_auth
+
+    class _AdminAuth:
+        is_configured = True
+        def is_admin(self, username):
+            return True
+
+    monkeypatch.setattr(auth_mod, "AuthManager", lambda: _AdminAuth())
+    monkeypatch.setattr(
+        "src.tool_execution.owner_is_admin_or_single_user",
+        lambda owner: True,
+    )
+
+    from src.tool_execution import execute_tool_block
+    from src.constants import DATA_DIR
+    desc, result = await execute_tool_block(
+        _make_block("read_file", os.path.join(DATA_DIR, "auth.json")),
+        owner="admin-user",
+    )
+    assert "application state" in (result.get("error") or "")
     assert result.get("exit_code") == 1

@@ -52,6 +52,44 @@ _SENSITIVE_FILE_PATTERNS: tuple[str, ...] = (
     "known_hosts",
 )
 
+# Odysseus's own credential/state files. They live directly inside the
+# (allowlisted) data dir, so the generic deny-list above never catches them —
+# yet they hold session tokens, the admin password hash, the TOTP secret +
+# backup codes, vault state and API tokens. A model-controlled read_file path
+# (`read_file data/auth.json`) could exfiltrate a live session token, turning a
+# prompt injection into persistent account takeover. Deny them explicitly (C1).
+# Matched case-insensitively because macOS (APFS) and Windows open `AUTH.JSON`
+# as `auth.json`, which would otherwise slip past an exact-case check.
+_PROTECTED_STATE_EXACT: frozenset[str] = frozenset({
+    "auth.json", "sessions.json", "settings.json",
+    "integrations.json", ".app_key",
+})
+_PROTECTED_STATE_PREFIXES: tuple[str, ...] = ("vault", "tokens")
+_PROTECTED_STATE_SUFFIXES: tuple[str, ...] = (".db", ".db-wal", ".db-shm")
+
+
+def _is_protected_app_state(resolved: str) -> bool:
+    """Return True for Odysseus's own credential/state files sitting directly
+    in the data root. Only the data-root level is protected, so the agent's
+    working subdirectories (``generated_images/``, ``uploads/``, …) stay fully
+    usable. ``resolved`` must already be an ``os.path.realpath`` result.
+    """
+    try:
+        from src.constants import DATA_DIR
+        data_root = os.path.realpath(DATA_DIR)
+    except Exception:
+        # Fail closed: if we can't locate the data root, we can't prove the
+        # path is safe, so refuse rather than risk exposing state files.
+        return True
+    if os.path.dirname(resolved) != data_root:
+        return False
+    name = os.path.basename(resolved).lower()
+    return (
+        name in _PROTECTED_STATE_EXACT
+        or name.startswith(_PROTECTED_STATE_PREFIXES)
+        or name.endswith(_PROTECTED_STATE_SUFFIXES)
+    )
+
 
 def _is_sensitive_path(resolved: str) -> bool:
     """Return True if *resolved* falls under a sensitive directory or
@@ -129,7 +167,8 @@ def _resolve_tool_path(raw_path: str) -> str:
       1. Non-empty path.
       2. Sensitive-subpath deny list (blocks .ssh, .gnupg, etc.
          even when the root is on the allowlist).
-      3. Allowlist containment (must land under one of the roots).
+      3. Odysseus state-file deny list (blocks data/auth.json etc.).
+      4. Allowlist containment (must land under one of the roots).
 
     Returns the realpath on success. Raises ValueError on rejection.
     Symlinks are resolved before comparison.
@@ -143,6 +182,12 @@ def _resolve_tool_path(raw_path: str) -> str:
         raise ValueError(
             f"path '{raw_path}' is inside a sensitive directory "
             f"(e.g. .ssh, .gnupg) or matches a sensitive filename"
+        )
+
+    if _is_protected_app_state(resolved):
+        raise ValueError(
+            f"path '{raw_path}' targets Odysseus application state "
+            f"(credentials, sessions, tokens, database) and is not accessible"
         )
 
     for root in _tool_path_roots():
