@@ -16,6 +16,32 @@ from starlette.responses import Response
 INTERNAL_TOOL_TOKEN = os.environ.get("ODYSSEUS_INTERNAL_TOKEN") or secrets.token_hex(32)
 INTERNAL_TOOL_HEADER = "X-Odysseus-Internal-Token"
 
+# Headers that prove a request was forwarded by a proxy/tunnel (cloudflared,
+# nginx, Caddy, Tailscale Funnel, …). Those connect to the app FROM 127.0.0.1,
+# so without this check every tunneled request would look like loopback.
+_PROXY_FWD_HEADERS = (
+    "cf-connecting-ip", "cf-ray", "cf-visitor",
+    "x-forwarded-for", "x-forwarded-host", "x-real-ip", "forwarded",
+)
+
+
+def is_trusted_loopback(request: Request) -> bool:
+    """True ONLY for a DIRECT loopback connection with no proxy/tunnel
+    forwarding headers. A bare ``client.host in ('127.0.0.1','::1')`` check is
+    unsafe behind a Cloudflare tunnel / reverse proxy: those connect from
+    loopback, so a remote visitor would otherwise inherit local trust and slip
+    past the internal-tool path. Odysseus's own in-process agent loopback calls
+    carry none of these headers, so they still qualify. Shared by app.py's
+    AuthMiddleware and require_admin so both gates agree.
+    """
+    host = request.client.host if request.client else None
+    if host not in ("127.0.0.1", "::1"):
+        return False
+    for _h in _PROXY_FWD_HEADERS:
+        if request.headers.get(_h):
+            return False
+    return True
+
 
 def require_admin(request: Request):
     """Raise 403 if the current user isn't an admin.
@@ -23,12 +49,16 @@ def require_admin(request: Request):
     the in-process internal-tool token used by loopback agent tools.
     """
     # In-process bypass for tool-layer loopback calls. Two paths:
-    # (a) header-direct (caller set X-Odysseus-Internal-Token), or
-    # (b) the auth middleware already validated the token and stamped
+    # (a) header-direct (caller set X-Odysseus-Internal-Token) — must ALSO be a
+    #     trusted loopback connection, mirroring AuthMiddleware. Without the
+    #     loopback check a leaked token could grant admin from a cross-origin /
+    #     tunneled request (the header is no longer in CORS allow_headers, but
+    #     defense-in-depth: the two gates must agree). (H3)
+    # (b) the auth middleware already validated token + loopback and stamped
     #     request.state.current_user = "internal-tool".
     try:
         hdr = request.headers.get(INTERNAL_TOOL_HEADER)
-        if hdr and secrets.compare_digest(hdr, INTERNAL_TOOL_TOKEN):
+        if hdr and secrets.compare_digest(hdr, INTERNAL_TOOL_TOKEN) and is_trusted_loopback(request):
             return
         if getattr(request.state, "current_user", None) == "internal-tool":
             return
