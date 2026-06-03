@@ -32,6 +32,38 @@ engine = create_engine(
     connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {}
 )
 
+
+def _harden_db_storage() -> None:
+    """Lock down the local SQLite storage at rest (H1).
+
+    The SQLite file (plus its -wal/-shm siblings) and the data directory are
+    created at the process umask — typically 0644 / 0755 — which lets any other
+    local user read the chat history, encrypted-secret blobs and, alongside it,
+    auth.json/sessions.json. We tighten the data dir to 0700 (the umbrella that
+    protects everything inside) and the DB files to 0600 (defends a stolen file
+    copy too). Idempotent, best-effort, and a no-op on Windows (safe_chmod).
+    Runs at import so it applies regardless of entrypoint and also repairs files
+    written world-readable before this shipped.
+    """
+    if "sqlite" not in DATABASE_URL:
+        return
+    import glob
+    from core.platform_compat import safe_chmod
+
+    db_path = DATABASE_URL.split("sqlite:///", 1)[-1]
+    data_dir = os.path.dirname(db_path) or "."
+    try:
+        os.makedirs(data_dir, exist_ok=True)
+        safe_chmod(data_dir, 0o700)
+    except OSError as e:
+        logger.debug(f"Could not harden data dir {data_dir!r}: {e}")
+    for pattern in ("*.db", "*.db-wal", "*.db-shm"):
+        for f in glob.glob(os.path.join(data_dir, pattern)):
+            safe_chmod(f, 0o600)
+
+
+_harden_db_storage()
+
 # Create session factory
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 

@@ -196,7 +196,8 @@ def load_settings() -> dict:
 def save_settings(settings: dict):
     """Persist settings to disk (atomic; see core.atomic_io)."""
     from core.atomic_io import atomic_write_json
-    atomic_write_json(SETTINGS_FILE, settings, indent=2)
+    # 0o600: settings.json can hold provider API keys and other secrets (H1).
+    atomic_write_json(SETTINGS_FILE, settings, indent=2, mode=0o600)
     _invalidate_caches()
 
 

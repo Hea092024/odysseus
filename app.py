@@ -34,6 +34,15 @@ from dotenv import load_dotenv
 # is silently ignored and the user is unexpectedly forced to log in (issue #142).
 # utf-8-sig reads plain UTF-8 (no BOM) identically, so this is safe everywhere.
 load_dotenv(encoding="utf-8-sig")
+
+# Lock .env to the owner only (H1) — it holds API keys / the admin password.
+# The app never rewrites .env, so do it once at startup. No-op on Windows.
+if os.name != "nt":
+    try:
+        os.chmod(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"), 0o600)
+    except OSError:
+        pass
+
 import uuid
 
 import asyncio

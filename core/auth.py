@@ -127,7 +127,7 @@ class AuthManager:
         try:
             with self._sessions_lock:
                 snapshot = dict(self._sessions)
-            _atomic_write_json(self._sessions_path, snapshot)
+            _atomic_write_json(self._sessions_path, snapshot, mode=0o600)
         except Exception as e:
             logger.error(f"Failed to save sessions: {e}")
 
@@ -160,7 +160,7 @@ class AuthManager:
             self._save()
 
     def _save(self):
-        _atomic_write_json(self.auth_path, self._config, indent=2)
+        _atomic_write_json(self.auth_path, self._config, indent=2, mode=0o600)
 
     @property
     def users(self) -> Dict[str, Any]:

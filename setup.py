@@ -108,6 +108,13 @@ def create_default_admin():
         }
         with open(auth_path, "w", encoding="utf-8") as f:
             json.dump(auth_data, f, indent=2)
+        # Lock the password store to the owner only (H1). No-op on Windows,
+        # where the user-profile ACL already restricts access.
+        if os.name != "nt":
+            try:
+                os.chmod(auth_path, 0o600)
+            except OSError:
+                pass
 
         if sys.stdin.isatty() and not os.getenv("ODYSSEUS_ADMIN_PASSWORD"):
             print(f"  [ok] Admin account created ({username})")
