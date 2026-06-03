@@ -18,7 +18,7 @@
 
 ### Sprint 1 — Critical path (C1, H1, M2, H3, C2)
 
-#### [ ] C1 — Critical — Agent file tools can read `data/auth.json` (token theft → persistent takeover)
+#### [x] C1 — Critical — Agent file tools can read `data/auth.json` (token theft → persistent takeover) — `9fd1ba8`
 - **Files:** `src/tool_execution.py:76-108` (`_tool_path_roots`, esp. `:84-85` adds `DATA_DIR`); `src/tool_execution.py:42-73` (`_SENSITIVE_BASENAMES` / `_is_sensitive_path`).
 - **Fix:** Confine `read_file`/`write_file` to a dedicated `data/agent_workspace/` instead of the whole `DATA_DIR`. If keeping `DATA_DIR` as a root, add a hard deny in `_is_sensitive_path` for any resolved path under `DATA_DIR` matching `{auth.json, sessions.json, settings.json, vault*, *.db, *.db-wal, *.db-shm, tokens*, .app_key, integrations.json}`.
 - **Effort:** Low.
@@ -241,7 +241,7 @@ Every finding above is `[x]` with a commit SHA. Recommend a final regression pas
 
 | Phase | Scope | Items | Done |
 |---|---|---|---|
-| 1 — Security | C1, C2, H1–H4, M1–M10, L1–L8 | 20 | 0 / 20 |
+| 1 — Security | C1, C2, H1–H4, M1–M10, L1–L8 | 20 | 1 / 20 |
 | 2 — Performance | P2.1–P2.7 | 7 | 0 / 7 |
 | 3 — Intelligence | P3.1–P3.7 | 7 | 0 / 7 |
 
