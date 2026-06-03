@@ -33,10 +33,12 @@
 - **Fix:** Add `"/api/vault"` to the blocklist tuple.
 - **Effort:** Trivial.
 
-#### [ ] H3 — High — `require_admin` header path skips loopback check; `X-Odysseus-Owner` admin impersonation
+#### [x] H3 — High — `require_admin` header path skips loopback check; `X-Odysseus-Owner` admin impersonation — `b154eca`
 - **Files:** `core/middleware.py:29-36` (header-direct grant — add loopback requirement); `app.py:237-251` (`_is_trusted_loopback` — move into `core/middleware` so both share it); `app.py:270-277` (`X-Odysseus-Owner` impersonation); `app.py:94-104` (drop `X-Odysseus-Internal-Token` from CORS `allow_headers`).
 - **Fix:** In `require_admin`, require `_is_trusted_loopback(request)` alongside the token match. Refuse `X-Odysseus-Owner` impersonation of admins (or store it in a separate `request.state.impersonated_owner` that authz never reads). Remove the internal-token header from CORS.
 - **Effort:** Low.
+- **Done:** Moved `is_trusted_loopback` to `core/middleware.py` (single shared impl); `require_admin` now requires token **and** loopback; removed `X-Odysseus-Internal-Token` from CORS `allow_headers`. Tests in `tests/test_require_admin_loopback.py`.
+- **Deviation:** Kept `X-Odysseus-Owner` attribution (did NOT refuse admin impersonation). Reaching that branch already requires the internal token + trusted loopback, which already grants full admin — impersonation adds no authority. Refusing it would break the agent attributing the admin's own notes/calendar/gallery (the loopback caller sets `X-Odysseus-Owner` to the session owner, which here is the admin — see `src/tool_implementations.py:2489`). The escalation surface (token-without-loopback, CORS exposure) is closed instead.
 
 #### [ ] C2 — Critical — `/v1/chat` `base_url` SSRF unfixed
 - **Files:** `routes/webhook_routes.py:234-373` (guard `body.base_url` before `:291`); `src/llm_core.py` (`llm_call` ~`:795`, `llm_call_async` ~`:942` — add a `check_outbound_url` chokepoint on the final resolved URL); `src/endpoint_resolver.py:117-130` (`resolve_url` rewrites host — chokepoint must run after this); `THREAT_MODEL.md:77` (correct the false "PR #1039 fixes this").
@@ -241,7 +243,7 @@ Every finding above is `[x]` with a commit SHA. Recommend a final regression pas
 
 | Phase | Scope | Items | Done |
 |---|---|---|---|
-| 1 — Security | C1, C2, H1–H4, M1–M10, L1–L8 | 20 | 3 / 20 |
+| 1 — Security | C1, C2, H1–H4, M1–M10, L1–L8 | 20 | 4 / 20 |
 | 2 — Performance | P2.1–P2.7 | 7 | 0 / 7 |
 | 3 — Intelligence | P3.1–P3.7 | 7 | 0 / 7 |
 
