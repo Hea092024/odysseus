@@ -2684,6 +2684,7 @@ _APP_API_BLOCKLIST_PREFIXES = (
     "/api/tokens",         # api token mgmt (bare /api/tokens list+create must also block)
     "/api/admin",          # admin one-shots (wipe etc.)
     "/api/backup/restore", # destructive restore
+    "/api/vault",          # vault unlock/lock/config — never agent-reachable (M2)
 )
 
 # (method, prefix) pairs to refuse specifically. Used for endpoints
