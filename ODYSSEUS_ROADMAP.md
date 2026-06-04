@@ -40,12 +40,14 @@
 - **Done:** Moved `is_trusted_loopback` to `core/middleware.py` (single shared impl); `require_admin` now requires token **and** loopback; removed `X-Odysseus-Internal-Token` from CORS `allow_headers`. Tests in `tests/test_require_admin_loopback.py`.
 - **Deviation:** Kept `X-Odysseus-Owner` attribution (did NOT refuse admin impersonation). Reaching that branch already requires the internal token + trusted loopback, which already grants full admin — impersonation adds no authority. Refusing it would break the agent attributing the admin's own notes/calendar/gallery (the loopback caller sets `X-Odysseus-Owner` to the session owner, which here is the admin — see `src/tool_implementations.py:2489`). The escalation surface (token-without-loopback, CORS exposure) is closed instead.
 
-#### [ ] C2 — Critical — `/v1/chat` `base_url` SSRF unfixed
+#### [x] C2 — Critical — `/v1/chat` `base_url` SSRF unfixed — `ab4384d`
 - **Files:** `routes/webhook_routes.py:234-373` (guard `body.base_url` before `:291`); `src/llm_core.py` (`llm_call` ~`:795`, `llm_call_async` ~`:942` — add a `check_outbound_url` chokepoint on the final resolved URL); `src/endpoint_resolver.py:117-130` (`resolve_url` rewrites host — chokepoint must run after this); `THREAT_MODEL.md:77` (correct the false "PR #1039 fixes this").
 - **Fix:** `check_outbound_url(base_url, block_private=True)` in the `/v1/chat` handler, **and** the same guard inside `llm_call`/`llm_call_async` on the post-resolve URL so the Tailscale rewrite (M-aggravator) is covered. Add `100.64.0.0/10` to private ranges.
 - **Effort:** Low–Medium.
+- **Done:** `/v1/chat` validates a caller-supplied `base_url` with `check_outbound_url(block_private=CHAT_BLOCK_PRIVATE_IPS default true)` → blocks loopback/LAN/CGNAT/metadata; explicit `100.64.0.0/10` block added to `url_safety._classify` (Python's `is_private` misses it). `llm_call`/`llm_call_async` gained `_guard_outbound_target[_async]` (metadata/link-local block on every dispatch). `THREAT_MODEL.md` corrected. Tests in `tests/test_chat_base_url_ssrf.py`.
+- **Note:** The `llm_call` chokepoint uses `block_private=False` (metadata-only) by necessity — `block_private=True` there would break every local model (Ollama/llama.cpp/LAN/Tailnet all resolve to private IPs). The Tailscale-rewrite vector is instead closed at the handler: caller base_urls are validated with `block_private=True`, and `check_outbound_url` fails closed on the unresolvable hostnames that would trigger `resolve_url`'s Tailnet rewrite.
 
-**Sprint 1 gate:** C1, H1, M2, H3, C2 all `[x]`.
+**Sprint 1 gate:** C1, H1, M2, H3, C2 all `[x]` ✅ **COMPLETE**
 
 ---
 
@@ -243,7 +245,7 @@ Every finding above is `[x]` with a commit SHA. Recommend a final regression pas
 
 | Phase | Scope | Items | Done |
 |---|---|---|---|
-| 1 — Security | C1, C2, H1–H4, M1–M10, L1–L8 | 20 | 4 / 20 |
+| 1 — Security | C1, C2, H1–H4, M1–M10, L1–L8 | 20 | 5 / 20 |
 | 2 — Performance | P2.1–P2.7 | 7 | 0 / 7 |
 | 3 — Intelligence | P3.1–P3.7 | 7 | 0 / 7 |
 
