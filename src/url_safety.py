@@ -25,6 +25,12 @@ from urllib.parse import urlparse
 
 ALLOWED_SCHEMES = ("http", "https")
 
+# Carrier-grade NAT (RFC 6598) — also the default Tailscale/CGNAT range. Python's
+# ``ip.is_private`` does NOT flag it, but Odysseus's endpoint resolver can rewrite
+# a host to a Tailnet peer in this range, so a private-egress lockdown must treat
+# it as internal too.
+_CGNAT_V4 = ipaddress.ip_network("100.64.0.0/10")
+
 
 def _default_resolver(host: str) -> List[str]:
     """Resolve a hostname to the list of IP strings it maps to (A + AAAA)."""
@@ -40,7 +46,11 @@ def _classify(ip: ipaddress._BaseAddress, *, block_private: bool) -> Optional[st
         return f"link-local address blocked (SSRF metadata risk): {ip}"
     if ip.is_multicast or ip.is_reserved or ip.is_unspecified:
         return f"disallowed address: {ip}"
-    if block_private and (ip.is_private or ip.is_loopback):
+    if block_private and (
+        ip.is_private
+        or ip.is_loopback
+        or (isinstance(ip, ipaddress.IPv4Address) and ip in _CGNAT_V4)
+    ):
         return f"private/loopback address blocked: {ip}"
     return None
 

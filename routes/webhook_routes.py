@@ -279,6 +279,7 @@ def setup_webhook_routes(
             model = body.model or "deepseek-chat"
 
             # Resolve base_url: explicit > provider name > model prefix auto-detect
+            base_url_explicit = bool(body.base_url)
             base_url = body.base_url.strip().rstrip("/") if body.base_url else None
             if not base_url:
                 base_url = _resolve_base_url(model, body.provider)
@@ -288,6 +289,22 @@ def setup_webhook_routes(
                     "or provider ('deepseek', 'openai', 'groq', etc.)")
 
             base_url = normalize_base(base_url)
+            # SSRF guard (C2): a caller-supplied base_url is fully attacker-
+            # controlled, and the server fetches it and returns the response.
+            # Block loopback/LAN/metadata by default — a remote API caller has no
+            # legitimate reason to point chat at the server's own internals. Set
+            # CHAT_BLOCK_PRIVATE_IPS=false to allow it (e.g. a trusted local
+            # script hitting a loopback model through the API). Provider-autodetect
+            # URLs are public, so this never blocks them.
+            if base_url_explicit:
+                import os as _os
+                from src.url_safety import check_outbound_url
+                _block_private = _os.getenv("CHAT_BLOCK_PRIVATE_IPS", "true").lower() not in (
+                    "0", "false", "no", "off",
+                )
+                _ok, _reason = check_outbound_url(base_url, block_private=_block_private)
+                if not _ok:
+                    raise HTTPException(400, f"Rejected base_url: {_reason}")
             endpoint_url = build_chat_url(base_url)
 
             if not session_manager:

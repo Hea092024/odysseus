@@ -74,7 +74,7 @@ These are open, acknowledged, and contributor help is welcome:
 
 1. **No shell/filesystem sandbox.** The agent `bash` and `read_file`/`write_file` tools run as the app process user with no network egress filtering or filesystem confinement. A successful prompt-injection reaching a shell-enabled admin session can make outbound requests to internal services. See #1058 for the sandbox proposal.
 
-2. **SSRF via `/api/v1/chat` `base_url` parameter.** A chat-scoped API token can supply an arbitrary `base_url`; the server forwards the LLM request to that host without validating the scheme or address. PR #1039 fixes this.
+2. **SSRF via `/api/v1/chat` `base_url` parameter (mitigated).** A chat-scoped API token can supply an arbitrary `base_url`. The `/v1/chat` handler now validates a caller-supplied `base_url` via `src/url_safety.py:check_outbound_url`, blocking loopback/LAN/CGNAT/metadata by default (override with `CHAT_BLOCK_PRIVATE_IPS=false`). `llm_call`/`llm_call_async` additionally apply a metadata/link-local block on every dispatch as defense-in-depth. Scheme is restricted to http(s).
 
 3. **`src/search/` partial consolidation.** `src.search.core` and `src.search.providers` correctly alias `services.search` via `sys.modules` replacement. `analytics`, `cache`, `content`, `query`, and `ranking` are still independent copies that can drift. The SSRF regression tests in `tests/test_webhook_ssrf_resilience.py` test `src.webhook_manager` directly (separate from search), so the safety net there is intact. See #1058.
 

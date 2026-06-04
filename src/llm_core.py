@@ -792,8 +792,42 @@ def normalize_model_id(endpoint_url: str, requested: str, timeout: int = LLMConf
             return a
     return None
 
+def _guard_outbound_target(target_url: str) -> None:
+    """Defense-in-depth SSRF net on the final LLM request URL (C2).
+
+    Runs for EVERY dispatch so no caller can forget it. Uses block_private=False
+    so local models (loopback / LAN / Ollama / Tailnet peers) keep working — this
+    only ever rejects the cloud instance-metadata / link-local + multicast /
+    reserved ranges, which no LLM endpoint serves. We hard-block solely on an
+    address classification: an unresolvable host or non-HTTP scheme can't reach
+    metadata anyway and is left for httpx to fail naturally, so a DNS hiccup never
+    turns a working endpoint into an error. The caller-supplied-base_url path
+    (which CAN legitimately target private ranges via SSRF) is locked down
+    separately at the /v1/chat handler with block_private=True.
+    """
+    try:
+        from src.url_safety import check_outbound_url
+        ok, reason = check_outbound_url(target_url, block_private=False)
+    except Exception:
+        return
+    if not ok and ("link-local" in reason or "disallowed address" in reason):
+        raise HTTPException(502, f"Blocked outbound LLM request: {reason}")
+
+
+async def _guard_outbound_target_async(target_url: str) -> None:
+    """Async wrapper for _guard_outbound_target — runs the blocking DNS check off
+    the event loop."""
+    try:
+        from src.url_safety import check_outbound_url
+        ok, reason = await asyncio.to_thread(check_outbound_url, target_url, block_private=False)
+    except Exception:
+        return
+    if not ok and ("link-local" in reason or "disallowed address" in reason):
+        raise HTTPException(502, f"Blocked outbound LLM request: {reason}")
+
+
 def llm_call(url: str, model: str, messages: List[Dict], temperature: float = LLMConfig.DEFAULT_TEMPERATURE,
-             max_tokens: int = LLMConfig.DEFAULT_MAX_TOKENS, headers: Optional[Dict] = None, 
+             max_tokens: int = LLMConfig.DEFAULT_MAX_TOKENS, headers: Optional[Dict] = None,
              timeout: int = LLMConfig.DEFAULT_TIMEOUT, prompt_type: Optional[str] = None) -> str:
     """Synchronous LLM call with optional prompt type enhancement."""
     h = _provider_headers(_detect_provider(url))
@@ -852,6 +886,7 @@ def llm_call(url: str, model: str, messages: List[Dict], temperature: float = LL
         if max_tokens and max_tokens > 0:
             tok_key = "max_completion_tokens" if _uses_max_completion_tokens(model) else "max_tokens"
             payload[tok_key] = max_tokens
+    _guard_outbound_target(target_url)
     try:
         note_model_activity(target_url, model)
         r = httpx.post(target_url, headers=h, json=payload, timeout=timeout)
@@ -1002,6 +1037,8 @@ async def llm_call_async(
 
     if _is_host_dead(target_url):
         raise HTTPException(503, f"Upstream {_host_key(target_url)} marked unreachable (cooldown active)")
+
+    await _guard_outbound_target_async(target_url)
 
     call_timeout = httpx.Timeout(connect=3.0, read=float(timeout), write=10.0, pool=5.0)
     attempt = 0
