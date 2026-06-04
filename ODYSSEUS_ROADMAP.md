@@ -53,10 +53,11 @@
 
 ### Sprint 2 — Close prompt injection properly (H2, M1, H4)
 
-#### [ ] H2 — High — File-tool deny-list incomplete + case-sensitive
+#### [x] H2 — High — File-tool deny-list incomplete + case-sensitive — `3a75937`
 - **Files:** `src/tool_execution.py:42-53` (expand `_SENSITIVE_BASENAMES`/patterns); `:56-73` (`_is_sensitive_path` — casefold via `os.path.normcase` on case-insensitive platforms); `:88-108` (`tool_path_extra_roots` — prefer allowlist-only).
 - **Fix:** Add `.aws .azure .kube .docker .config .mozilla .terraform.d`, patterns `credentials *.pem *.key id_dsa .git-credentials .npmrc .pypirc Cookies login.keychain*`. Casefold both sides of every comparison. Treat extra roots as an explicit allowlist, not deny-list-only.
 - **Effort:** Low–Medium.
+- **Done:** Restructured deny-list into `_SENSITIVE_DIR_NAMES` (cloud/cluster/registry/browser dirs) + `_SENSITIVE_FILE_NAMES` + `_SENSITIVE_NAME_SUFFIXES` (`.pem`/`.key`) + `_SENSITIVE_NAME_PREFIXES` (`login.keychain`); all matched lowercased (case-insensitive). `_tool_path_roots` now refuses `/` and `$HOME` as extra roots (logs + skips) so the deny-list isn't the sole guard for an entire tree. Tests added to `tests/test_tool_path_confinement.py` (24 new).
 
 #### [ ] M1 — Medium — Mid-loop tool output not wrapped as untrusted context
 - **Files:** `src/agent_loop.py:~1150-1165` (where tool results are appended as `tool`/`user` messages); `src/prompt_security.py` (`untrusted_context_message`, `UNTRUSTED_CONTEXT_HEADER`); `mcp_servers/email_server.py`, `mcp_servers/rag_server.py` (email/RAG output).
@@ -245,7 +246,7 @@ Every finding above is `[x]` with a commit SHA. Recommend a final regression pas
 
 | Phase | Scope | Items | Done |
 |---|---|---|---|
-| 1 — Security | C1, C2, H1–H4, M1–M10, L1–L8 | 20 | 5 / 20 |
+| 1 — Security | C1, C2, H1–H4, M1–M10, L1–L8 | 20 | 6 / 20 |
 | 2 — Performance | P2.1–P2.7 | 7 | 0 / 7 |
 | 3 — Intelligence | P3.1–P3.7 | 7 | 0 / 7 |
 
