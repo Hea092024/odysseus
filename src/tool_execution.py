@@ -39,18 +39,35 @@ MAX_READ_CHARS = 20_000
 #      "tool_path_extra_roots" setting (list of path strings).
 # ---------------------------------------------------------------------------
 
-_SENSITIVE_BASENAMES: set[str] = {
-    ".ssh", ".gnupg", ".gitconfig",
+# All deny-list entries are stored lowercase and matched case-insensitively:
+# macOS (APFS, default case-insensitive) and Windows open `~/.SSH/ID_RSA` as the
+# real file, so an exact-case check would be trivially bypassable. On a genuinely
+# case-sensitive filesystem this slightly over-blocks (e.g. a distinct file named
+# `Authorized_Keys`), which is a safe failure, never an exposure.
+
+# Directory names: a match on ANY path component blocks the whole subtree, so a
+# secret under one of these dirs is unreachable regardless of the root above it.
+_SENSITIVE_DIR_NAMES: frozenset[str] = frozenset({
+    ".ssh", ".gnupg",
+    ".aws", ".azure", ".kube", ".docker",   # cloud / cluster / registry creds
+    ".config", ".mozilla", ".terraform.d",  # gcloud & many app tokens, browser profiles, tf creds
+})
+
+# Exact filenames (matched against the basename only).
+_SENSITIVE_FILE_NAMES: frozenset[str] = frozenset({
+    ".gitconfig",
     ".bashrc", ".bash_profile", ".bash_logout",
     ".zshrc", ".zprofile", ".zshenv",
     ".profile", ".tcshrc", ".cshrc",
     ".env", ".netrc",
-}
+    ".git-credentials", ".npmrc", ".pypirc",
+    "authorized_keys", "known_hosts", "credentials",
+    "id_rsa", "id_dsa", "id_ed25519", "id_ecdsa",
+})
 
-_SENSITIVE_FILE_PATTERNS: tuple[str, ...] = (
-    "authorized_keys", "id_rsa", "id_ed25519", "id_ecdsa",
-    "known_hosts",
-)
+# Basename suffix / prefix matches for families that don't have a fixed name.
+_SENSITIVE_NAME_SUFFIXES: tuple[str, ...] = (".pem", ".key")  # private keys / certs
+_SENSITIVE_NAME_PREFIXES: tuple[str, ...] = ("login.keychain",)  # macOS keychain (.keychain[-db])
 
 # Odysseus's own credential/state files. They live directly inside the
 # (allowlisted) data dir, so the generic deny-list above never catches them —
@@ -92,23 +109,24 @@ def _is_protected_app_state(resolved: str) -> bool:
 
 
 def _is_sensitive_path(resolved: str) -> bool:
-    """Return True if *resolved* falls under a sensitive directory or
-    matches a sensitive filename — regardless of what root it sits under.
+    """Return True if *resolved* falls under a sensitive directory or matches a
+    sensitive filename — regardless of what root it sits under. Comparison is
+    case-insensitive (see the deny-list note above).
     """
-    parts = resolved.split(os.sep)
-    filenames: set[str] = {parts[-1]} if parts else set()
+    parts = [p.lower() for p in resolved.split(os.sep) if p]
+    if not parts:
+        return False
 
-    # Check if any path component is a sensitive directory.
-    for part in parts:
-        if part in _SENSITIVE_BASENAMES:
-            return True
+    # Any path component that is a sensitive directory blocks the whole subtree.
+    if any(part in _SENSITIVE_DIR_NAMES for part in parts):
+        return True
 
-    # Check filename against known sensitive files.
-    for pat in _SENSITIVE_FILE_PATTERNS:
-        if pat in filenames:
-            return True
-
-    return False
+    name = parts[-1]
+    return (
+        name in _SENSITIVE_FILE_NAMES
+        or name.endswith(_SENSITIVE_NAME_SUFFIXES)
+        or name.startswith(_SENSITIVE_NAME_PREFIXES)
+    )
 
 
 def _tool_path_roots() -> list[str]:
@@ -136,12 +154,29 @@ def _tool_path_roots() -> list[str]:
     if tmpdir:
         roots.append(tmpdir)
 
-    # Opt-in extra roots from settings.
+    # Opt-in extra roots from settings. Reject dangerously broad roots — the
+    # filesystem root and the home dir itself — so an extra root can't degrade
+    # the model into "everything except the deny-list" (deny-lists are never
+    # complete). The admin must name specific working subdirectories instead.
     try:
         from src.settings import get_setting
         extra = get_setting("tool_path_extra_roots")
         if isinstance(extra, list):
-            roots.extend(str(r) for r in extra if r)
+            _forbidden_roots = {
+                os.path.realpath("/"),
+                os.path.realpath(os.path.expanduser("~")),
+            }
+            for r in extra:
+                if not r:
+                    continue
+                rp = os.path.realpath(os.path.expanduser(str(r)))
+                if rp in _forbidden_roots:
+                    logger.warning(
+                        "Ignoring overly-broad tool_path_extra_roots entry %r (%s) — "
+                        "name a specific subdirectory instead.", r, rp,
+                    )
+                    continue
+                roots.append(rp)
     except Exception:
         pass
 

@@ -270,6 +270,78 @@ def test_resolve_blocks_auth_json_via_traversal():
         _resolve_tool_path(sneaky)
 
 
+# ── H2: expanded + case-insensitive deny-list ───────────────────────
+
+import pytest as _pytest
+
+
+@_pytest.mark.parametrize("path", [
+    "/home/u/.aws/credentials",
+    "/home/u/.config/gcloud/access_tokens.db",
+    "/home/u/.kube/config",
+    "/home/u/.docker/config.json",
+    "/home/u/.azure/accessTokens.json",
+    "/home/u/.terraform.d/credentials.tfrc.json",
+    "/home/u/.mozilla/firefox/cookies.sqlite",
+    "/home/u/.git-credentials",
+    "/home/u/proj/.npmrc",
+    "/home/u/proj/.pypirc",
+    "/home/u/certs/server.pem",
+    "/home/u/keys/private.key",
+    "/home/u/.ssh/id_dsa",
+    "/Users/u/Library/Keychains/login.keychain-db",
+])
+def test_expanded_sensitive_paths(path):
+    from src.tool_execution import _is_sensitive_path
+    assert _is_sensitive_path(path), path
+
+
+@_pytest.mark.parametrize("path", [
+    "/home/u/.AWS/credentials",      # dir casefold
+    "/home/u/.SSH/ID_RSA",           # dir + exact-name casefold
+    "/home/u/certs/SERVER.PEM",      # suffix casefold
+])
+def test_sensitive_paths_case_insensitive(path):
+    from src.tool_execution import _is_sensitive_path
+    assert _is_sensitive_path(path), path
+
+
+@_pytest.mark.parametrize("path", [
+    "/home/u/projects/main.py",
+    "/tmp/notes.txt",
+    "/home/u/data/report.pdf",
+    "/home/u/keymaker.py",           # not a *.key file
+])
+def test_non_sensitive_paths_still_allowed(path):
+    from src.tool_execution import _is_sensitive_path
+    assert not _is_sensitive_path(path), path
+
+
+def test_extra_root_home_rejected():
+    """$HOME as an extra root is too broad — it must be ignored, not added."""
+    from src.tool_execution import _tool_path_roots
+    home = os.path.realpath(os.path.expanduser("~"))
+    with patch("src.settings.get_setting", return_value=["~"]):
+        assert home not in _tool_path_roots()
+
+
+def test_extra_root_fs_root_rejected():
+    from src.tool_execution import _tool_path_roots
+    with patch("src.settings.get_setting", return_value=["/"]):
+        assert os.path.realpath("/") not in _tool_path_roots()
+
+
+def test_extra_root_specific_subdir_allowed(tmp_path):
+    """A narrow subdirectory is still honored — only home/root are refused."""
+    from src.tool_execution import _resolve_tool_path
+    sub = tmp_path / "agentwork"
+    sub.mkdir()
+    target = sub / "file.txt"
+    target.write_text("ok")
+    with patch("src.settings.get_setting", return_value=[str(sub)]):
+        assert _resolve_tool_path(str(target)) == os.path.realpath(str(target))
+
+
 # ── Integration: dispatch-level tests ────────────────────────────────
 
 @pytest.mark.asyncio
